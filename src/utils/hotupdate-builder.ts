@@ -107,14 +107,32 @@ export class HotUpdateBuilder {
         throw new Error("Bundle validation failed");
       }
 
-      // Copy additional assets
+      // Copy additional assets (non-Metro assets)
       const additionalAssets = await this.copyAdditionalAssets(assetsDir);
+
+      // Analyze Metro-generated assets
+      const metroAssets = await this.analyzeMetroAssets(assetsDir);
+
+      // Combine both asset lists
+      const allAssets = [...metroAssets, ...additionalAssets];
+
+      // Verify asset consistency
+      const verification = await this.verifyAssetConsistency(
+        bundlePath,
+        assetsDir
+      );
+      if (verification.warnings.length > 0) {
+        console.log("⚠️  Asset warnings:");
+        verification.warnings.forEach((warning) =>
+          console.log(`   ${warning}`)
+        );
+      }
 
       // Generate manifest
       await this.generateHotUpdateManifest(
         platform,
         bundlePath,
-        additionalAssets,
+        allAssets,
         platformDir
       );
 
@@ -160,18 +178,69 @@ export class HotUpdateBuilder {
   }
 
   /**
-   * Copy additional assets that might be needed for hot update
+   * Analyze Metro-generated assets and create asset mapping
    */
+  private async analyzeMetroAssets(assetsDir: string): Promise<AssetFile[]> {
+    const assetFiles: AssetFile[] = [];
+
+    // Metro creates platform-specific asset directories
+    const assetDirs = [
+      "drawable-mdpi",
+      "drawable-hdpi",
+      "drawable-xhdpi",
+      "drawable-xxhdpi",
+      "drawable-xxxhdpi",
+      "raw",
+    ];
+
+    for (const dir of assetDirs) {
+      const dirPath = path.join(assetsDir, dir);
+      if (await fs.pathExists(dirPath)) {
+        const files = await fs.readdir(dirPath);
+
+        for (const file of files) {
+          const filePath = path.join(dirPath, file);
+          const stats = await fs.stat(filePath);
+
+          if (stats.isFile()) {
+            const assetFile: AssetFile = {
+              name: file,
+              type: path.extname(file).substring(1),
+              httpServerLocation: `${dir}/${file}`, // Metro asset path
+              scales: this.getDensityScale(dir),
+              hash: stats.mtime.getTime().toString(),
+            };
+
+            assetFiles.push(assetFile);
+          }
+        }
+      }
+    }
+
+    return assetFiles;
+  }
+
+  /**
+   * Get density scale from drawable directory name
+   */
+  private getDensityScale(dirName: string): number[] {
+    const scaleMap: Record<string, number[]> = {
+      "drawable-mdpi": [1],
+      "drawable-hdpi": [1.5],
+      "drawable-xhdpi": [2],
+      "drawable-xxhdpi": [3],
+      "drawable-xxxhdpi": [4],
+      raw: [1],
+    };
+
+    return scaleMap[dirName] || [1];
+  }
   private async copyAdditionalAssets(assetsDir: string): Promise<AssetFile[]> {
+    // Metro already handles most assets when bundling
+    // We only need to copy additional assets that are referenced outside of require()
     const assetPatterns = [
-      "assets/**/*",
-      "src/assets/**/*",
-      "**/*.png",
-      "**/*.jpg",
-      "**/*.jpeg",
-      "**/*.gif",
-      "**/*.webp",
-      "**/*.svg",
+      "assets/**/*", // Root assets folder (if any)
+      // Don't copy src/assets as they're already bundled by Metro
     ];
 
     const excludePatterns = [
@@ -181,6 +250,10 @@ export class HotUpdateBuilder {
       ".git/**",
       "dist/**",
       "build/**",
+      "src/**", // Exclude src assets as Metro handles them
+      "**/.DS_Store",
+      "**/*.md",
+      "**/*.txt",
     ];
 
     return this.bundleBuilder.copyAssets(
@@ -231,8 +304,60 @@ export class HotUpdateBuilder {
   }
 
   /**
-   * Create ZIP file containing bundle, assets, and manifest
+   * Verify that bundle assets are consistent with hot update package
    */
+  private async verifyAssetConsistency(
+    bundlePath: string,
+    assetsDir: string
+  ): Promise<{ valid: boolean; warnings: string[] }> {
+    const warnings: string[] = [];
+
+    // Read bundle content to find asset references
+    const bundleContent = await fs.readFile(bundlePath, "utf8");
+
+    // Look for common asset require patterns
+    const assetPatterns = [
+      /require\(['"]([^'"]+\.(?:png|jpg|jpeg|gif|webp|svg))['"]]/g,
+      /import\s+[^'"]+\s+from\s+['"]([^'"]+\.(?:png|jpg|jpeg|gif|webp|svg))['"]]/g,
+    ];
+
+    const bundleAssets = new Set<string>();
+
+    for (const pattern of assetPatterns) {
+      let match;
+      while ((match = pattern.exec(bundleContent)) !== null) {
+        bundleAssets.add(match[1]);
+      }
+    }
+
+    console.log(`🔍 Found ${bundleAssets.size} asset references in bundle`);
+
+    // Check if Metro generated corresponding assets
+    const metroAssets = await this.analyzeMetroAssets(assetsDir);
+    const metroAssetNames = new Set(metroAssets.map((a) => a.name));
+
+    // Verify assets exist
+    for (const assetPath of bundleAssets) {
+      const assetName = path.basename(assetPath);
+      const assetNameWithoutExt = path.parse(assetName).name;
+
+      // Metro generates assets with hash suffixes sometimes
+      const hasMetroAsset = Array.from(metroAssetNames).some((name) =>
+        name.includes(assetNameWithoutExt)
+      );
+
+      if (!hasMetroAsset) {
+        warnings.push(
+          `Asset referenced in bundle but not found in Metro output: ${assetPath}`
+        );
+      }
+    }
+
+    return {
+      valid: warnings.length === 0,
+      warnings,
+    };
+  }
   private async createZipFile(
     platform: string,
     platformDir: string

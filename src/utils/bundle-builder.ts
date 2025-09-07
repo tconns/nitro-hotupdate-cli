@@ -115,7 +115,7 @@ export class BundleBuilder {
         const assetFile: AssetFile = {
           name: path.basename(file),
           type: path.extname(file).substring(1),
-          httpServerLocation: `assets/${file}`,
+          httpServerLocation: `assets/${file}`.replace(/\\/g, "/"), // Normalize path separators
           scales: [1], // Default scale
           hash: stats.mtime.getTime().toString(),
         };
