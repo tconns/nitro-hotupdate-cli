@@ -1,0 +1,27 @@
+# Source files
+src/
+tsconfig.json
+test-merge.ts
+
+# Examples
+example/
+
+# Development
+.git/
+.gitignore
+yarn.lock
+
+# Testing
+coverage/
+*.test.js
+*.spec.js
+
+# IDE
+.vscode/
+.idea/
+
+# Build artifacts from examples
+example/hotupdate-build/
+example/android/app/src/main/res/drawable*/
+example/android/app/src/main/res/layout*/
+example/android/app/src/main/res/values/styles.xml.backup.*

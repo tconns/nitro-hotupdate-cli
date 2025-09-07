@@ -1,0 +1,75 @@
+{
+  "name": "nitro-hotupdate-cli",
+  "version": "0.0.1",
+  "description": "CLI tool to build separate JS bundles and assets for React Native hot update functionality",
+  "main": "dist/index.js",
+  "bin": {
+    "nitro-hotupdate": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "test": "npm run build && node dist/index.js build -c test/hotupdate.config.json",
+    "test:advanced": "npm run build && node dist/index.js advanced build-platform -c test/hotupdate.config.json -p ios android",
+    "test:validate": "npm run build && node dist/index.js advanced validate",
+    "clean": "rimraf dist hotupdate-build",
+    "prepublishOnly": "npm run build",
+    "bundle:demo": "npm run build && node dist/index.js build -c test/hotupdate.config.json --verbose"
+  },
+  "keywords": [
+    "react-native",
+    "nitro",
+    "hotupdate",
+    "hot-update",
+    "cli",
+    "bundle",
+    "assets",
+    "android",
+    "ios",
+    "zip",
+    "codepush",
+    "ota",
+    "over-the-air"
+  ],
+  "author": "tconns <your.email@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tconns/nitro-hotupdate-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tconns/nitro-hotupdate-cli/issues"
+  },
+  "homepage": "https://github.com/tconns/nitro-hotupdate-cli#readme",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "@react-native-community/cli": "^12.0.0",
+    "archiver": "^6.0.2",
+    "commander": "^12.0.0",
+    "fs-extra": "^11.2.0",
+    "glob": "^10.3.0",
+    "inquirer": "^8.2.7",
+    "metro": "^0.80.0",
+    "semver": "^7.5.4"
+  },
+  "devDependencies": {
+    "@types/archiver": "^5.3.0",
+    "@types/fs-extra": "^11.0.2",
+    "@types/glob": "^8.1.0",
+    "@types/inquirer": "^8.2.6",
+    "@types/node": "^20.11.19",
+    "@types/semver": "^7.5.0",
+    "rimraf": "^5.0.0",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.5"
+  }
+}
