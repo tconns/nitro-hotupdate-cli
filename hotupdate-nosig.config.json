@@ -1,0 +1,21 @@
+{
+  "project": {
+    "path": "D:\\rnma",
+    "entryFile": "index.js"
+  },
+  "build": {
+    "platforms": ["android"],
+    "version": "1.0.2",
+    "outputPath": "./config-nosig-build",
+    "bundleName": "index",
+    "sourcemap": false,
+    "minify": true
+  },
+  "signature": {
+    "enabled": false
+  },
+  "metadata": {
+    "description": "Hot update configuration without signature",
+    "author": "Test Developer"
+  }
+}

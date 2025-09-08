@@ -3,6 +3,14 @@ import fs from "fs-extra";
 import path from "path";
 import semver from "semver";
 
+export interface SignatureConfig {
+  enabled: boolean;
+  algorithm?: "RSA-SHA256" | "ECDSA-SHA256";
+  privateKeyPath?: string;
+  publicKeyPath?: string;
+  autoGenerate?: boolean;
+}
+
 export interface BuildConfig {
   platforms: ("ios" | "android")[];
   version: string;
@@ -11,6 +19,7 @@ export interface BuildConfig {
   bundleName?: string;
   sourcemap?: boolean;
   minify?: boolean;
+  signature?: SignatureConfig;
 }
 
 export class PromptHelper {
@@ -108,6 +117,49 @@ export class PromptHelper {
         message: "Minify bundle?",
         default: true,
       },
+      {
+        type: "confirm",
+        name: "enableSignature",
+        message: "Enable digital signature verification?",
+        default: false,
+      },
+      {
+        type: "list",
+        name: "signatureAlgorithm",
+        message: "Choose signature algorithm:",
+        choices: [
+          { name: "RSA-SHA256 (Recommended)", value: "RSA-SHA256" },
+          { name: "ECDSA-SHA256", value: "ECDSA-SHA256" },
+        ],
+        default: "RSA-SHA256",
+        when: (answers) => answers.enableSignature,
+      },
+      {
+        type: "list",
+        name: "keyOption",
+        message: "Choose key option:",
+        choices: [
+          { name: "Auto-generate new key pair", value: "generate" },
+          { name: "Use existing private key", value: "existing" },
+        ],
+        default: "generate",
+        when: (answers) => answers.enableSignature,
+      },
+      {
+        type: "input",
+        name: "privateKeyPath",
+        message: "Private key path:",
+        default: "./keys/hotupdate_private.pem",
+        when: (answers) =>
+          answers.enableSignature && answers.keyOption === "existing",
+        validate: (input) => {
+          if (!input.trim()) {
+            return "Private key path cannot be empty";
+          }
+          // Just validate the path format, file will be checked later or auto-generated
+          return true;
+        },
+      },
     ]);
 
     // Calculate version based on user choice
@@ -137,6 +189,29 @@ export class PromptHelper {
       bundleName: answers.bundleName || undefined,
       sourcemap: answers.sourcemap,
       minify: answers.minify,
+      signature: answers.enableSignature
+        ? {
+            enabled: true,
+            algorithm: answers.signatureAlgorithm,
+            autoGenerate: answers.keyOption === "generate",
+            privateKeyPath:
+              answers.keyOption === "generate"
+                ? path.join(
+                    path.resolve(answers.outputPath),
+                    "keys",
+                    "hotupdate_private.pem"
+                  )
+                : path.resolve(answers.privateKeyPath),
+            publicKeyPath:
+              answers.keyOption === "generate"
+                ? path.join(
+                    path.resolve(answers.outputPath),
+                    "keys",
+                    "hotupdate_public.pem"
+                  )
+                : undefined,
+          }
+        : undefined,
     };
   }
 
@@ -213,6 +288,21 @@ export class PromptHelper {
     console.log(`   Bundle: ${config.bundleName || "index"}`);
     console.log(`   Source maps: ${config.sourcemap ? "Yes" : "No"}`);
     console.log(`   Minify: ${config.minify ? "Yes" : "No"}`);
+    console.log(
+      `   Digital signature: ${
+        config.signature?.enabled ? `Yes (${config.signature.algorithm})` : "No"
+      }`
+    );
+
+    if (config.signature?.enabled) {
+      console.log(
+        `   Private key: ${
+          config.signature.autoGenerate
+            ? "Auto-generate"
+            : config.signature.privateKeyPath
+        }`
+      );
+    }
 
     const { confirm } = await inquirer.prompt([
       {

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { PromptHelper } from "./utils/prompt-helper";
+import { PromptHelper, SignatureConfig } from "./utils/prompt-helper";
 import { HotUpdateBuilder } from "./utils/hotupdate-builder";
+import { DigitalSignature } from "./utils/digital-signature";
+import { ConfigLoader } from "./utils/config-loader";
 import { createAdvancedCommand } from "./commands/advanced";
 
 const program = new Command();
@@ -39,7 +41,14 @@ program
       }
 
       // Build bundles
-      const builder = new HotUpdateBuilder(config);
+      const signatureConfig = config.signature?.enabled
+        ? {
+            algorithm: config.signature.algorithm || "RSA-SHA256",
+            keySize: config.signature.algorithm === "RSA-SHA256" ? 2048 : 256,
+          }
+        : undefined;
+
+      const builder = new HotUpdateBuilder(config, signatureConfig);
       const results = await builder.buildAllPlatforms();
 
       // Show summary
@@ -65,6 +74,169 @@ program
     }
   });
 
+// Signature commands
+const signatureCmd = program
+  .command("signature")
+  .description("Digital signature management commands");
+
+// Generate key pair
+signatureCmd
+  .command("generate-keys")
+  .description("Generate RSA/ECDSA key pair for signing")
+  .option(
+    "-a, --algorithm <algorithm>",
+    "Algorithm (RSA-SHA256|ECDSA-SHA256)",
+    "RSA-SHA256"
+  )
+  .option(
+    "-s, --key-size <size>",
+    "Key size (2048,3072,4096 for RSA; 256,384,521 for ECDSA)",
+    "2048"
+  )
+  .option("-o, --output <dir>", "Output directory for keys", "./keys")
+  .option("-n, --name <name>", "Key pair name", "hotupdate")
+  .action(async (opts) => {
+    try {
+      const keySize = parseInt(opts.keySize);
+      const signatureConfig = {
+        algorithm: opts.algorithm as "RSA-SHA256" | "ECDSA-SHA256",
+        keySize,
+      };
+
+      const digitalSignature = new DigitalSignature(signatureConfig);
+      const result = await digitalSignature.generateAndSaveKeyPair(
+        opts.output,
+        opts.name
+      );
+
+      console.log("🔐 Key pair generated successfully!");
+      console.log(`   Algorithm: ${opts.algorithm}`);
+      console.log(`   Key size: ${keySize}`);
+      console.log(`   Private key: ${result.privateKeyPath}`);
+      console.log(`   Public key: ${result.publicKeyPath}`);
+      console.log("\n⚠️  Important:");
+      console.log("   - Keep your private key secure and never share it");
+      console.log("   - Back up your keys in a secure location");
+      console.log("   - Distribute the public key to verify signatures");
+    } catch (error) {
+      console.error("❌ Failed to generate keys:", error);
+      process.exit(1);
+    }
+  });
+
+// Sign manifest
+signatureCmd
+  .command("sign")
+  .description("Sign a manifest.json file")
+  .requiredOption("-m, --manifest <path>", "Path to manifest.json file")
+  .requiredOption("-k, --private-key <path>", "Path to private key file")
+  .action(async (opts) => {
+    try {
+      const digitalSignature = new DigitalSignature();
+      const result = await digitalSignature.signManifest(
+        opts.manifest,
+        opts.privateKey
+      );
+
+      console.log("🔐 Manifest signed successfully!");
+      console.log(`   Algorithm: ${result.algorithm}`);
+      console.log(`   Signature: ${result.signature.substring(0, 50)}...`);
+      console.log(`   Timestamp: ${new Date(result.timestamp).toISOString()}`);
+    } catch (error) {
+      console.error("❌ Failed to sign manifest:", error);
+      process.exit(1);
+    }
+  });
+
+// Verify signature
+signatureCmd
+  .command("verify")
+  .description("Verify a signed manifest.json file")
+  .requiredOption("-m, --manifest <path>", "Path to manifest.json file")
+  .option(
+    "-k, --public-key <path>",
+    "Path to public key file (optional if embedded in manifest)"
+  )
+  .action(async (opts) => {
+    try {
+      const digitalSignature = new DigitalSignature();
+      const result = await digitalSignature.verifyManifest(
+        opts.manifest,
+        opts.publicKey
+      );
+
+      if (result.isValid) {
+        console.log("✅ Signature verification successful!");
+        console.log(`   Algorithm: ${result.algorithm}`);
+        if (result.timestamp) {
+          console.log(`   Signed: ${new Date(result.timestamp).toISOString()}`);
+        }
+      } else {
+        console.log("❌ Signature verification failed!");
+        if (result.error) {
+          console.log(`   Error: ${result.error}`);
+        }
+        process.exit(1);
+      }
+    } catch (error) {
+      console.error("❌ Verification failed:", error);
+      process.exit(1);
+    }
+  });
+
+// Build from config file command
+program
+  .command("build-config")
+  .description("Build using configuration from hotupdate.config.json")
+  .option("-c, --config <path>", "Path to config file", "hotupdate.config.json")
+  .option("--dry-run", "Show configuration without building", false)
+  .action(async (opts) => {
+    try {
+      console.log("🚀 Nitro Hot Update CLI - Config Mode\n");
+
+      // Load configuration
+      console.log(`📄 Loading configuration: ${opts.config}`);
+      const hotUpdateConfig = await ConfigLoader.loadConfig(opts.config);
+
+      // Display config summary
+      ConfigLoader.displayConfigSummary(hotUpdateConfig);
+
+      if (opts.dryRun) {
+        console.log("\n✅ Dry run completed - configuration is valid");
+        return;
+      }
+
+      // Convert to BuildConfig
+      const buildConfig = await ConfigLoader.toBuildConfig(hotUpdateConfig);
+
+      // Build bundles
+      const signatureConfig = buildConfig.signature?.enabled
+        ? {
+            algorithm: buildConfig.signature.algorithm || "RSA-SHA256",
+            keySize:
+              buildConfig.signature.algorithm === "RSA-SHA256" ? 2048 : 256,
+          }
+        : undefined;
+
+      const builder = new HotUpdateBuilder(buildConfig, signatureConfig);
+      const results = await builder.buildAllPlatforms();
+
+      // Show summary
+      HotUpdateBuilder.getSummary(results);
+
+      // Check if any builds failed
+      const failedBuilds = results.filter((r) => !r.success);
+      if (failedBuilds.length > 0) {
+        process.exit(1);
+      }
+
+      console.log("🎉 Build from config completed successfully!");
+    } catch (error) {
+      console.error("❌ Config build failed:", error);
+      process.exit(1);
+    }
+  });
+
 // Quick build command (for CI/CD)
 program
   .command("build-ci")
@@ -83,6 +255,13 @@ program
   .option("--bundle-name <name>", "Bundle name", "index")
   .option("--sourcemap", "Generate source maps", false)
   .option("--no-minify", "Disable minification", false)
+  .option("--signature", "Enable digital signature", false)
+  .option(
+    "--signature-algorithm <algorithm>",
+    "Signature algorithm (RSA-SHA256|ECDSA-SHA256)",
+    "RSA-SHA256"
+  )
+  .option("--private-key <path>", "Path to private key for signing")
   .action(async (opts) => {
     try {
       // Parse platforms
@@ -119,6 +298,16 @@ program
         bundleName: opts.bundleName,
         sourcemap: opts.sourcemap,
         minify: !opts.noMinify,
+        signature: opts.signature
+          ? {
+              enabled: true,
+              algorithm: opts.signatureAlgorithm as
+                | "RSA-SHA256"
+                | "ECDSA-SHA256",
+              privateKeyPath: opts.privateKey,
+              autoGenerate: !opts.privateKey, // Auto-generate if no private key provided
+            }
+          : undefined,
       };
 
       console.log("🏗️  Building with configuration:");
@@ -128,7 +317,14 @@ program
       console.log(`   Output: ${config.outputPath}\n`);
 
       // Build bundles
-      const builder = new HotUpdateBuilder(config);
+      const signatureConfig = config.signature?.enabled
+        ? {
+            algorithm: config.signature.algorithm || "RSA-SHA256",
+            keySize: config.signature.algorithm === "RSA-SHA256" ? 2048 : 256,
+          }
+        : undefined;
+
+      const builder = new HotUpdateBuilder(config, signatureConfig);
       const results = await builder.buildAllPlatforms();
 
       // Show summary
@@ -147,6 +343,63 @@ program
 
 // Add advanced commands
 program.addCommand(createAdvancedCommand());
+
+// Config management commands
+const configCmd = program
+  .command("config")
+  .description("Configuration file management commands");
+
+// Generate example config
+configCmd
+  .command("init")
+  .description("Generate example hotupdate.config.json file")
+  .option("-o, --output <path>", "Output file path", "hotupdate.config.json")
+  .option("--force", "Overwrite existing config file", false)
+  .action(async (opts) => {
+    try {
+      const fs = await import("fs-extra");
+
+      if ((await fs.pathExists(opts.output)) && !opts.force) {
+        console.error(`❌ Config file already exists: ${opts.output}`);
+        console.log(
+          "   Use --force to overwrite or specify different output path"
+        );
+        process.exit(1);
+      }
+
+      await ConfigLoader.generateExampleConfig(opts.output);
+
+      console.log("✅ Example configuration generated!");
+      console.log("\n📝 Next steps:");
+      console.log("   1. Edit the configuration file to match your project");
+      console.log("   2. Run: nitro-hotupdate build-config");
+      console.log(
+        "\n💡 Use --dry-run to validate configuration without building"
+      );
+    } catch (error) {
+      console.error("❌ Failed to generate config:", error);
+      process.exit(1);
+    }
+  });
+
+// Validate config
+configCmd
+  .command("validate")
+  .description("Validate hotupdate.config.json file")
+  .option("-c, --config <path>", "Path to config file", "hotupdate.config.json")
+  .action(async (opts) => {
+    try {
+      console.log(`🔍 Validating configuration: ${opts.config}`);
+
+      const hotUpdateConfig = await ConfigLoader.loadConfig(opts.config);
+      ConfigLoader.displayConfigSummary(hotUpdateConfig);
+
+      console.log("\n✅ Configuration is valid!");
+    } catch (error) {
+      console.error("❌ Configuration validation failed:", error);
+      process.exit(1);
+    }
+  });
 
 // Quick start command
 program

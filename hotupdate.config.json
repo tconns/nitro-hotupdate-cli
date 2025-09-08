@@ -1,0 +1,26 @@
+{
+  "project": {
+    "path": "D:\\rnma",
+    "entryFile": "index.js"
+  },
+  "build": {
+    "platforms": ["android"],
+    "version": "1.0.1",
+    "outputPath": "./config-test-build",
+    "bundleName": "index",
+    "sourcemap": false,
+    "minify": true
+  },
+  "signature": {
+    "enabled": true,
+    "algorithm": "RSA-SHA256",
+    "privateKeyPath": "./keys/hotupdate_private.pem",
+    "publicKeyPath": "./keys/hotupdate_public.pem",
+    "autoGenerate": true
+  },
+  "metadata": {
+    "description": "Hot update configuration for React Native Test App",
+    "author": "Test Developer",
+    "homepage": "https://github.com/test/rnma"
+  }
+}

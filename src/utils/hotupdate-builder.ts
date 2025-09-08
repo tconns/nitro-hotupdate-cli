@@ -3,6 +3,11 @@ import path from "path";
 import archiver from "archiver";
 import { BundleBuilder, BundleConfig, AssetFile } from "./bundle-builder";
 import { BuildConfig } from "./prompt-helper";
+import {
+  DigitalSignature,
+  SignatureConfig,
+  SignatureResult,
+} from "./digital-signature";
 
 export interface BuildResult {
   success: boolean;
@@ -12,15 +17,21 @@ export interface BuildResult {
   zipPath: string;
   size: number;
   error?: string;
+  signatureResult?: SignatureResult;
 }
 
 export class HotUpdateBuilder {
   private config: BuildConfig;
   private bundleBuilder: BundleBuilder;
+  private digitalSignature?: DigitalSignature;
 
-  constructor(config: BuildConfig) {
+  constructor(config: BuildConfig, signatureConfig?: SignatureConfig) {
     this.config = config;
     this.bundleBuilder = new BundleBuilder(config.projectPath);
+
+    if (signatureConfig) {
+      this.digitalSignature = new DigitalSignature(signatureConfig);
+    }
   }
 
   /**
@@ -34,6 +45,11 @@ export class HotUpdateBuilder {
     // Ensure output directory exists
     await fs.ensureDir(this.config.outputPath);
 
+    // Generate keys if signature is enabled (either auto-generate or check existing)
+    if (this.config.signature?.enabled && this.digitalSignature) {
+      await this.generateSignatureKeys();
+    }
+
     for (const platform of this.config.platforms) {
       console.log(`📱 Building for ${platform}...`);
 
@@ -43,7 +59,11 @@ export class HotUpdateBuilder {
 
         if (result.success) {
           console.log(`✅ ${platform} build completed: ${result.zipPath}`);
-          console.log(`   Size: ${this.formatBytes(result.size)}\n`);
+          console.log(`   Size: ${this.formatBytes(result.size)}`);
+          if (result.signatureResult) {
+            console.log(`   Signature: ${result.signatureResult.algorithm}`);
+          }
+          console.log("");
         } else {
           console.error(`❌ ${platform} build failed: ${result.error}\n`);
         }
@@ -63,6 +83,57 @@ export class HotUpdateBuilder {
     }
 
     return results;
+  }
+
+  /**
+   * Generate signature keys if auto-generate is enabled or private key doesn't exist
+   */
+  private async generateSignatureKeys(): Promise<void> {
+    if (!this.digitalSignature || !this.config.signature?.enabled) {
+      return;
+    }
+
+    const keysDir = path.join(this.config.outputPath, "keys");
+    const keyName = "hotupdate";
+    let shouldGenerate = false;
+
+    if (this.config.signature.autoGenerate) {
+      shouldGenerate = true;
+    } else if (this.config.signature.privateKeyPath) {
+      // Check if private key exists, if not, generate it
+      if (!(await fs.pathExists(this.config.signature.privateKeyPath))) {
+        console.log(
+          `⚠️  Private key not found: ${this.config.signature.privateKeyPath}`
+        );
+        console.log(`🔑 Auto-generating keys...`);
+        shouldGenerate = true;
+      }
+    }
+
+    if (!shouldGenerate) {
+      return;
+    }
+
+    try {
+      const keyPair = await this.digitalSignature.generateAndSaveKeyPair(
+        keysDir,
+        keyName
+      );
+
+      // Update config with generated key paths
+      if (this.config.signature) {
+        this.config.signature.privateKeyPath = keyPair.privateKeyPath;
+        this.config.signature.publicKeyPath = keyPair.publicKeyPath;
+      }
+
+      console.log(
+        `🔐 Generated signature keys for ${this.config.signature?.algorithm}`
+      );
+      console.log(`   Keys saved to: ${keysDir}\n`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to generate signature keys: ${message}`);
+    }
   }
 
   /**
@@ -136,6 +207,28 @@ export class HotUpdateBuilder {
         platformDir
       );
 
+      // Sign manifest if digital signature is enabled
+      let signatureResult: SignatureResult | undefined;
+      if (
+        this.config.signature?.enabled &&
+        this.digitalSignature &&
+        this.config.signature.privateKeyPath
+      ) {
+        try {
+          const manifestPath = path.join(platformDir, "manifest.json");
+          signatureResult = await this.digitalSignature.signManifest(
+            manifestPath,
+            this.config.signature.privateKeyPath
+          );
+          console.log(`🔐 Manifest signed successfully`);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          console.warn(`⚠️  Signature failed: ${message}`);
+          console.warn(`   Continuing without signature...`);
+        }
+      }
+
       // Create ZIP file
       const zipPath = await this.createZipFile(platform, platformDir);
       const zipStats = await fs.stat(zipPath);
@@ -147,6 +240,7 @@ export class HotUpdateBuilder {
         assetsPath: assetsDir,
         zipPath,
         size: zipStats.size,
+        signatureResult,
       };
     } catch (error) {
       return {

@@ -2,3 +2,5 @@
 /dist
 /hotupdate-build
 /test
+/config-test-build
+/config-nosig-build
