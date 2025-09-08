@@ -279,12 +279,14 @@ export class HotUpdateBuilder {
       platform,
       bundleUrl: `bundles/${path.basename(bundlePath)}`,
       bundleSize: bundleInfo.size,
-      bundleHash: bundleInfo.hash,
+      bundleHash: bundleInfo.hash, // Keep legacy hash for backward compatibility
+      bundleSHA256: bundleInfo.sha256, // Add SHA256 hash for integrity check
       assets: assets.map((asset) => ({
         name: asset.name,
         type: asset.type,
         url: asset.httpServerLocation,
-        hash: asset.hash,
+        hash: asset.hash, // Keep legacy hash
+        sha256: asset.sha256, // Add SHA256 hash for integrity check
         size: 0, // Will be filled by actual file size if needed
       })),
       timestamp: Date.now(),
@@ -301,6 +303,9 @@ export class HotUpdateBuilder {
     await fs.writeJSON(manifestPath, manifest, { spaces: 2 });
 
     console.log(`📄 Generated hot update manifest: ${manifestPath}`);
+    if (bundleInfo.sha256) {
+      console.log(`🔐 Bundle SHA256: ${bundleInfo.sha256}`);
+    }
   }
 
   /**

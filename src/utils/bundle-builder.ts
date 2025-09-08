@@ -1,5 +1,6 @@
 import * as fs from "fs-extra";
 import * as path from "path";
+import * as crypto from "crypto";
 import { spawn } from "child_process";
 import { glob } from "glob";
 
@@ -22,6 +23,7 @@ export interface AssetFile {
   height?: number;
   scales: number[];
   hash: string;
+  sha256?: string; // SHA256 hash for integrity check
 }
 
 export class BundleBuilder {
@@ -29,6 +31,65 @@ export class BundleBuilder {
 
   constructor(projectRoot: string) {
     this.projectRoot = projectRoot;
+  }
+
+  /**
+   * Calculate SHA256 hash of a file
+   * @param filePath Path to the file
+   * @returns SHA256 hash in hex format
+   */
+  private async calculateSHA256(filePath: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const hash = crypto.createHash("sha256");
+      const stream = fs.createReadStream(filePath);
+
+      stream.on("data", (data) => {
+        hash.update(data);
+      });
+
+      stream.on("end", () => {
+        resolve(hash.digest("hex"));
+      });
+
+      stream.on("error", (error) => {
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * Calculate SHA256 hash with prefix format
+   * @param filePath Path to the file
+   * @returns SHA256 hash with "sha256:" prefix
+   */
+  private async calculateSHA256WithPrefix(filePath: string): Promise<string> {
+    const hash = await this.calculateSHA256(filePath);
+    return `sha256:${hash}`;
+  }
+
+  /**
+   * Verify file integrity using SHA256 hash
+   * @param filePath Path to the file
+   * @param expectedHash Expected hash in format "sha256:hash" or just "hash"
+   * @returns True if hash matches, false otherwise
+   */
+  async verifyFileIntegrity(
+    filePath: string,
+    expectedHash: string
+  ): Promise<boolean> {
+    try {
+      const calculatedHash = await this.calculateSHA256(filePath);
+
+      // Remove "sha256:" prefix if present
+      const cleanExpectedHash = expectedHash.startsWith("sha256:")
+        ? expectedHash.substring(7)
+        : expectedHash;
+
+      return calculatedHash === cleanExpectedHash;
+    } catch (error) {
+      console.error(`Error verifying file integrity for ${filePath}:`, error);
+      return false;
+    }
   }
 
   async buildBundle(config: BundleConfig): Promise<void> {
@@ -112,14 +173,21 @@ export class BundleBuilder {
         await fs.copy(sourcePath, destPath);
 
         const stats = await fs.stat(sourcePath);
+
+        // Only calculate SHA256 hash for files, not directories
+        let sha256Hash = "";
+        if (stats.isFile()) {
+          sha256Hash = await this.calculateSHA256(sourcePath);
+        }
+
         const assetFile: AssetFile = {
           name: path.basename(file),
           type: path.extname(file).substring(1),
           httpServerLocation: `assets/${file}`.replace(/\\/g, "/"), // Normalize path separators
           scales: [1], // Default scale
-          hash: stats.mtime.getTime().toString(),
+          hash: stats.mtime.getTime().toString(), // Keep legacy hash for backward compatibility
+          sha256: sha256Hash, // Add SHA256 hash for integrity check
         };
-
         copiedAssets.push(assetFile);
       }
     }
@@ -136,11 +204,21 @@ export class BundleBuilder {
   ): Promise<void> {
     const bundleStats = await fs.stat(bundlePath);
 
+    // Calculate SHA256 hash for the bundle
+    let bundleSHA256 = "";
+    try {
+      bundleSHA256 = await this.calculateSHA256WithPrefix(bundlePath);
+      console.log(`🔐 Bundle SHA256: ${bundleSHA256}`);
+    } catch (error) {
+      console.error(`❌ Failed to calculate SHA256 for ${bundlePath}:`, error);
+    }
+
     const manifest = {
       platform,
       bundleUrl: `bundles/${path.basename(bundlePath)}`,
       bundleSize: bundleStats.size,
-      bundleHash: bundleStats.mtime.getTime().toString(),
+      bundleHash: bundleStats.mtime.getTime().toString(), // Keep legacy hash for backward compatibility
+      bundleSHA256: bundleSHA256, // Add SHA256 hash for integrity check
       assets,
       timestamp: Date.now(),
       version: require(path.join(this.projectRoot, "package.json")).version,
@@ -150,6 +228,9 @@ export class BundleBuilder {
     await fs.writeJSON(manifestPath, manifest, { spaces: 2 });
 
     console.log(`📄 Generated manifest: ${manifestPath}`);
+    if (bundleSHA256) {
+      console.log(`🔐 Bundle SHA256: ${bundleSHA256}`);
+    }
   }
 
   async validateBundle(bundlePath: string): Promise<boolean> {
@@ -182,11 +263,14 @@ export class BundleBuilder {
 
   async getBundleInfo(
     bundlePath: string
-  ): Promise<{ size: number; hash: string; path: string }> {
+  ): Promise<{ size: number; hash: string; sha256: string; path: string }> {
     const stats = await fs.stat(bundlePath);
+    const sha256Hash = await this.calculateSHA256WithPrefix(bundlePath);
+
     return {
       size: stats.size,
-      hash: stats.mtime.getTime().toString(),
+      hash: stats.mtime.getTime().toString(), // Keep legacy hash for backward compatibility
+      sha256: sha256Hash, // Add SHA256 hash for integrity check
       path: bundlePath,
     };
   }

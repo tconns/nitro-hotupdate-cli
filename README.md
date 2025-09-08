@@ -10,7 +10,13 @@ CLI tool để build bundle JS và assets riêng biệt cho tính năng hot upda
 - **Smart Configuration**: Hỏi người dùng để cấu hình build phù hợp
 - **Zero Config**: Không cần tạo file config, mọi thứ được hỏi qua prompts
 
-### 📱 Platform Support
+### � Security & Integrity
+- **SHA256 Hash**: Tự động tính toán SHA256 hash cho bundle và assets
+- **Integrity Check**: Verify tính toàn vẹn file khi download
+- **Backward Compatible**: Vẫn giữ legacy hash để tương thích ngược
+- **Secure Downloads**: Đảm bảo file không bị thay đổi trong quá trình truyền tải
+
+### �📱 Platform Support
 - **iOS**: Tạo bundle main.jsbundle với assets
 - **Android**: Tạo bundle index.android.bundle với assets
 - **Cross-platform**: Support cả hai platform cùng lúc
@@ -130,12 +136,14 @@ hotupdate-build/
   "bundleUrl": "bundles/index.ios.bundle",
   "bundleSize": 1234567,
   "bundleHash": "abc123",
+  "bundleSHA256": "sha256:9f2c4a5b8d1e3f7a2c9b6e4d8a1c5f9e3b7a6d2c8e1f4a9b5d8c2e6f1a4b7c9e",
   "assets": [
     {
       "name": "logo.png",
       "type": "png",
       "url": "assets/logo.png",
-      "hash": "def456"
+      "hash": "def456",
+      "sha256": "a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890"
     }
   ],
   "timestamp": 1640995200000,
@@ -163,6 +171,8 @@ aws s3 cp hotupdate-build/android/ s3://your-bucket/bundles/android/1.0.0/ --rec
 
 ```javascript
 import { Platform } from 'react-native';
+import CryptoJS from 'crypto-js'; // For React Native
+// hoặc sử dụng native functions như ví dụ bên dưới
 
 const baseUrl = 'https://your-cdn.com/bundles';
 const currentVersion = '1.0.0';
@@ -182,6 +192,101 @@ async function checkForUpdates() {
   } catch (error) {
     console.error('Hot update check failed:', error);
   }
+}
+
+async function downloadAndApplyUpdate(bundleUrl, manifest) {
+  try {
+    // Download bundle
+    const bundleResponse = await fetch(bundleUrl);
+    const bundleContent = await bundleResponse.text();
+    
+    // Verify bundle integrity với SHA256
+    const calculatedHash = await calculateSHA256(bundleContent);
+    const expectedHash = manifest.bundleSHA256.replace('sha256:', '');
+    
+    if (calculatedHash !== expectedHash) {
+      throw new Error('Bundle integrity check failed!');
+    }
+    
+    // Download và verify assets
+    for (const asset of manifest.assets) {
+      if (asset.sha256) {
+        const assetUrl = `${baseUrl}/${manifest.platform}/${manifest.version}/${asset.url}`;
+        const assetResponse = await fetch(assetUrl);
+        const assetBuffer = await assetResponse.arrayBuffer();
+        
+        const assetHash = await calculateSHA256Buffer(assetBuffer);
+        if (assetHash !== asset.sha256) {
+          throw new Error(`Asset ${asset.name} integrity check failed!`);
+        }
+      }
+    }
+    
+    // Apply update nếu tất cả integrity checks pass
+    await applyBundle(bundleContent);
+    console.log('Hot update applied successfully with integrity verification!');
+    
+  } catch (error) {
+    console.error('Update failed:', error);
+  }
+}
+
+// Helper functions cho SHA256 calculation
+async function calculateSHA256(text) {
+  // Implementation phụ thuộc vào platform và library được sử dụng
+  // Có thể dùng CryptoJS, native modules, hoặc Web Crypto API
+}
+```
+
+### 3. Native Implementation Examples
+
+**Android (Kotlin):**
+```kotlin
+fun calculateSHA256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { fis ->
+        val buffer = ByteArray(1024)
+        var read: Int
+        while (fis.read(buffer).also { read = it } != -1) {
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
+
+fun verifyAndApplyUpdate(bundleFile: File, manifest: Manifest) {
+    val calculatedHash = calculateSHA256(bundleFile)
+    val expectedHash = manifest.bundleSHA256.removePrefix("sha256:")
+    
+    if (calculatedHash == expectedHash) {
+        // Apply update
+        applyHotUpdate(bundleFile)
+    } else {
+        Log.error("Bundle integrity verification failed!")
+    }
+}
+```
+
+**iOS (Swift):**
+```swift
+import CryptoKit
+
+func sha256(url: URL) -> String {
+    let data = try! Data(contentsOf: url)
+    let hash = SHA256.hash(data: data)
+    return hash.compactMap { String(format: "%02x", $0) }.joined() 
+}
+
+func verifyAndApplyUpdate(bundleUrl: URL, manifest: Manifest) {
+    let calculatedHash = sha256(url: bundleUrl)
+    let expectedHash = manifest.bundleSHA256.replacingOccurrences(of: "sha256:", with: "")
+    
+    if calculatedHash == expectedHash {
+        // Apply update
+        applyHotUpdate(bundleUrl)
+    } else {
+        print("Bundle integrity verification failed!")
+    }
 }
 ```
 

@@ -1,7 +1,7 @@
 {
   "name": "nitro-hotupdate-cli",
-  "version": "0.0.1",
-  "description": "CLI tool to build separate JS bundles and assets for React Native hot update functionality",
+  "version": "1.0.0",
+  "description": "CLI tool to build separate JS bundles and assets for React Native hot update functionality with SHA256 integrity check",
   "main": "dist/index.js",
   "bin": {
     "nitro-hotupdate": "dist/index.js"

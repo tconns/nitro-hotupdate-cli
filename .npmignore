@@ -1,26 +1,59 @@
 # Source files
 src/
+*.ts
+!*.d.ts
 tsconfig.json
-test-merge.ts
 
-# Examples
-example/
-
-# Development
+# Development files
+.vscode/
+.idea/
 .git/
 .gitignore
 yarn.lock
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Testing
+# Test files
+test/
+tests/
 coverage/
 *.test.js
+*.test.ts
 *.spec.js
+*.spec.ts
+__tests__/
 
-# IDE
-.vscode/
-.idea/
+# Build scripts and docs
+publish.ps1
+publish.sh
+BUILD.md
+docs/
 
-# Build artifacts from examples
+# Example files
+example/
+examples/
+*.example.js
+*.example.ts
+
+# Temporary and build artifacts
+tmp/
+temp/
+*.tmp
+*.tgz
+build/
+lib/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE temp files
+*.swp
+*.swo
+*~
+
+# Example build artifacts
 example/hotupdate-build/
 example/android/app/src/main/res/drawable*/
 example/android/app/src/main/res/layout*/
